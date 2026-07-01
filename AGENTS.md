@@ -68,3 +68,17 @@ Use MobileNetV4 for the image vector pipeline (converted to TFLite).
 
 This pair gives you highly stable, production-vetted C++ runtime bindings via the respective Flutter packages, ensuring your background thread isolate compiles perfectly without tricky dependencies.
 
+## Cursor Cloud specific instructions
+
+This is a **Flutter** app (`generative_ui_webgpu`), not a Python project (`main.py`/`pyproject.toml` are unused scaffolding). Despite the "WebGPU" README framing, the ML worker uses `dart:io`, so it does **not** run on Flutter web — the working target is the **Linux desktop** app. It embeds a background Dart Isolate that runs `onnxruntime` inference on the `bge-small-en-v1.5` model (384-dim embeddings).
+
+Standard commands (run from repo root; `flutter` is on `PATH` via `~/.bashrc`, installed at `/opt/flutter`):
+- Lint: `flutter analyze` (there is no `test/` directory, so `flutter test` reports "Test directory not found").
+- Build: `flutter build linux --debug`.
+- Run: `flutter run -d linux` (a GTK/X11 desktop is available on `DISPLAY=:1`).
+
+Non-obvious caveats:
+- The model binary `assets/models/bge-small-en-v1.5/onnx/model.onnx` (~133MB) is **declared in `pubspec.yaml` but not committed** (git-ignored). It is fetched by the environment update script from Hugging Face. If it is missing, `flutter build`/`run` fails with an asset-not-found error — re-run the update script or `curl` it from `https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/onnx/model.onnx` into that path. If the model can't be loaded, the isolate degrades gracefully to a mock-embedding mode (status shows `READY (FALLBACK MODE...)` instead of `READY (ONNX MODEL LOADED)`).
+- To view/interact with the GUI, launch the built bundle with `DISPLAY=:1` (e.g. `DISPLAY=:1 ./build/linux/x64/debug/bundle/generative_ui_webgpu`). Software GL emits harmless `libEGL warning: DRI3 ...` lines and falls back to Impeller OpenGLES; this is expected and not an error.
+- Hello-world flow: type text → `INFER` produces a 384-d vector; a second sentence via `COMPARE` yields a cosine-similarity score in the Vector Catalog.
+
