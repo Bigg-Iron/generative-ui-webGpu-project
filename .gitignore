@@ -47,3 +47,6 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Large on-device model binary (fetched by the environment update script, not committed)
+assets/models/bge-small-en-v1.5/onnx/model.onnx
