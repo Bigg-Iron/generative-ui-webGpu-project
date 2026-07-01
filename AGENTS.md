@@ -60,4 +60,11 @@ lib/
 
 To successfully pull off on-device inference without ballooning your Flutter app's binary size or draining device batteries, you must look strictly at models specifically built or quantized for Edge Deployment.
 
+When building the demo: configure the pipeline around ONNX (.onnx) or TFLite/LiteRT (.tflite) runtimes:
+
+Use bge-small-en-v1.5 for the text embedding pipeline (converted to ONNX).
+
+Use MobileNetV4 for the image vector pipeline (converted to TFLite).
+
+This pair gives you highly stable, production-vetted C++ runtime bindings via the respective Flutter packages, ensuring your background thread isolate compiles perfectly without tricky dependencies.
 
