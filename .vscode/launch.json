@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "generative_ui_webgpu (iPhone 17 Pro)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "476FD36A-6359-4739-BC60-9A78831606FC"
+    },
+    {
+      "name": "generative_ui_webgpu (profile)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "profile",
+      "deviceId": "476FD36A-6359-4739-BC60-9A78831606FC"
+    },
+    {
+      "name": "generative_ui_webgpu (release)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "release",
+      "deviceId": "476FD36A-6359-4739-BC60-9A78831606FC"
+    }
+  ]
+}
