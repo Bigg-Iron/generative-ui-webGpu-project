@@ -1,0 +1,9 @@
+appId: com.example.generativeUiWebgpu
+---
+- launchApp:
+    clearState: true
+- runFlow: ../subflows/wait_for_ready.yaml
+- runFlow: ../subflows/run_single_inference.yaml
+- assertVisible: "CLEAR"
+- tapOn: "CLEAR"
+- assertVisible: "CATALOG EMPTY"

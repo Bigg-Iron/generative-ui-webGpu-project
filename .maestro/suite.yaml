@@ -1,0 +1,12 @@
+appId: com.example.generativeUiWebgpu
+---
+- runFlow: flows/01_smoke_launch.yaml
+- runFlow: flows/02_worker_initialization.yaml
+- runFlow: flows/03_single_inference.yaml
+- runFlow: flows/04_compare_vectors.yaml
+- runFlow: flows/05_catalog_views.yaml
+- runFlow: flows/06_catalog_minimize.yaml
+- runFlow: flows/07_generative_intent.yaml
+- runFlow: flows/08_vector_detail_expand.yaml
+- runFlow: flows/09_clear_catalog.yaml
+- runFlow: flows/10_layout_intent_inference.yaml

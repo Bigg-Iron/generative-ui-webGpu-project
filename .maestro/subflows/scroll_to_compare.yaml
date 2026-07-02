@@ -1,0 +1,4 @@
+appId: com.example.generativeUiWebgpu
+---
+- assertVisible:
+    id: compare_input

@@ -10,12 +10,10 @@ import '../widgets/embedding_space_map.dart';
 import '../widgets/isolate_lane_monitor.dart';
 import '../widgets/minimal_animations.dart';
 import '../widgets/pipeline_theater.dart';
-import '../widgets/similarity_challenge.dart';
 import '../widgets/similarity_matrix.dart';
-import '../widgets/similarity_tree_graph.dart';
 import '../widgets/vector_detail_panel.dart';
 
-enum _CatalogViewMode { list, tree, map, matrix, challenge, generative }
+enum _CatalogViewMode { list, map, matrix, generative }
 
 class DashboardScreen extends StatefulWidget {
   final MlState state;
@@ -30,7 +28,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final TextEditingController _inputController = TextEditingController();
   final TextEditingController _compareController = TextEditingController();
   final TextEditingController _intentController = TextEditingController();
+  final TextEditingController _layoutIntentController = TextEditingController();
+  final ScrollController _workspaceToolsScrollController = ScrollController();
   bool _activeDetailExpanded = false;
+  bool _catalogMinimized = false;
+  bool _dismissedSuggestion = false;
   final Set<int> _expandedHistoryIds = {};
   _CatalogViewMode _catalogViewMode = _CatalogViewMode.list;
 
@@ -47,14 +49,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _inputController.dispose();
     _compareController.dispose();
     _intentController.dispose();
+    _layoutIntentController.dispose();
+    _workspaceToolsScrollController.dispose();
     super.dispose();
+  }
+
+  void _clearCatalog() {
+    setState(() {
+      _expandedHistoryIds.clear();
+      _catalogViewMode = _CatalogViewMode.list;
+    });
+    widget.state.clearHistory();
+  }
+
+  void _toggleCatalogMinimized() {
+    setState(() => _catalogMinimized = !_catalogMinimized);
   }
 
   void _handleSubmit() {
     final text = _inputController.text;
     if (text.trim().isNotEmpty) {
-      setState(() => _activeDetailExpanded = false);
-      widget.state.processText(text);
+      setState(() {
+        _activeDetailExpanded = false;
+        _dismissedSuggestion = false;
+      });
+      final layoutIntent = _layoutIntentController.text.trim();
+      widget.state.processText(
+        text,
+        layoutIntent: layoutIntent.isNotEmpty ? layoutIntent : null,
+      );
       _inputController.clear();
     }
   }
@@ -71,6 +94,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (intent.trim().isEmpty) return;
     widget.state.matchGenerativeIntent(intent);
     setState(() => _catalogViewMode = _CatalogViewMode.generative);
+  }
+
+  void _applySuggestion(String description) {
+    _intentController.text = description;
+    widget.state.matchGenerativeIntent(description);
+    setState(() {
+      _catalogViewMode = _CatalogViewMode.generative;
+      _dismissedSuggestion = true;
+    });
   }
 
   void _toggleHistoryExpanded(int id) {
@@ -97,7 +129,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
               builder: (context, constraints) {
                 final isWide = constraints.maxWidth >= _wideLayoutBreakpoint;
                 final workspace = _buildWorkspacePanel(isWide: isWide);
-                final catalog = _buildCatalogPanel();
+                final catalog = _buildCatalogPanel(isWide: isWide);
+
+                if (_catalogMinimized) {
+                  if (isWide) {
+                    return Row(
+                      children: [
+                        Expanded(child: workspace),
+                        _buildCatalogMinimizedRail(isWide: true),
+                      ],
+                    );
+                  }
+                  return Column(
+                    children: [
+                      Expanded(child: workspace),
+                      _buildCatalogMinimizedRail(isWide: false),
+                    ],
+                  );
+                }
 
                 if (isWide) {
                   return Row(
@@ -123,6 +172,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildWorkspacePanel({required bool isWide}) {
+    final hasActiveResult = widget.state.activeResult != null;
+    final toolsFlex = hasActiveResult ? 2 : 3;
+    final resultFlex = hasActiveResult ? 3 : 1;
+
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
@@ -133,47 +186,101 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flexible(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeader(),
-                  const SizedBox(height: AppSpacing.md),
-                  _buildStatusPanel(),
-                  const SizedBox(height: AppSpacing.md),
-                  IsolateLaneMonitor(
-                    timeline: widget.state.laneTimeline,
-                    isProcessing: widget.state.isProcessing,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  PipelineTheater(
-                    isProcessing: widget.state.isProcessing,
-                    activeStage: widget.state.activePipelineStage,
-                    tokens: widget.state.pipelineTokens,
-                    stageDetail: widget.state.pipelineDetail,
-                    l2Norm: widget.state.pipelineL2Norm,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  _buildInputArea(),
-                  const SizedBox(height: AppSpacing.sm),
-                  _buildCompareInputArea(),
-                  if (widget.state.isProcessing) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    const MinimalLoadingIndicator(),
+          _buildHeader(),
+          const SizedBox(height: AppSpacing.md),
+          _buildStatusPanel(),
+          const SizedBox(height: AppSpacing.md),
+          _buildPrimaryInputFields(),
+          const SizedBox(height: AppSpacing.sm),
+          _buildInferButton(),
+          const SizedBox(height: AppSpacing.sm),
+          _buildCompareInputArea(),
+          const SizedBox(height: AppSpacing.sm),
+          Expanded(
+            flex: toolsFlex,
+            child: Semantics(
+              identifier: 'workspace_tools_scroll',
+              child: SingleChildScrollView(
+                controller: _workspaceToolsScrollController,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (widget.state.isProcessing) ...[
+                      const MinimalLoadingIndicator(),
+                      const SizedBox(height: AppSpacing.sm),
+                    ],
+                    _buildSuggestedLayoutChip(),
+                    const SizedBox(height: AppSpacing.md),
+                    PipelineTheater(
+                      isProcessing: widget.state.isProcessing,
+                      activeStage: widget.state.activePipelineStage,
+                      tokens: widget.state.pipelineTokens,
+                      stageDetail: widget.state.pipelineDetail,
+                      l2Norm: widget.state.pipelineL2Norm,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    IsolateLaneMonitor(
+                      timeline: widget.state.laneTimeline,
+                      isProcessing: widget.state.isProcessing,
+                    ),
                   ],
-                ],
+                ),
               ),
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          Expanded(child: _buildActiveResult()),
+          Expanded(flex: resultFlex, child: _buildActiveResult()),
         ],
       ),
     );
   }
 
-  Widget _buildCatalogPanel() {
+  Widget _buildCatalogMinimizedRail({required bool isWide}) {
+    final count = widget.state.history.length;
+
+    return Material(
+      color: AppColors.cardBackground,
+      child: InkWell(
+        onTap: _toggleCatalogMinimized,
+        child: Container(
+          width: isWide ? 44 : double.infinity,
+          height: isWide ? double.infinity : 44,
+          decoration: BoxDecoration(
+            border: isWide
+                ? const Border(left: AppBorders.thinSide)
+                : const Border(top: AppBorders.thinSide),
+          ),
+          alignment: Alignment.center,
+          child: RotatedBox(
+            quarterTurns: isWide ? 1 : 0,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isWide ? Icons.chevron_left : Icons.expand_less,
+                  color: AppColors.mutedText,
+                  size: 16,
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Text(
+                  'CATALOG${count > 0 ? ' ($count)' : ''}',
+                  style: const TextStyle(
+                    color: AppColors.mutedText,
+                    fontFamily: 'monospace',
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCatalogPanel({required bool isWide}) {
     final history = widget.state.history;
 
     return Container(
@@ -182,58 +289,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'VECTOR CATALOG & LEARNING',
-                  style: TextStyle(
-                    color: AppColors.primaryText,
-                    fontFamily: 'monospace',
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Flexible(
-                child: _CatalogViewToggle(
-                  mode: _catalogViewMode,
-                  onChanged: (mode) => setState(() => _catalogViewMode = mode),
-                ),
-              ),
-              if (history.isNotEmpty) ...[
-                const SizedBox(width: AppSpacing.sm),
-                TextButton(
-                  onPressed: () {
-                    setState(() {
-                      _expandedHistoryIds.clear();
-                      _catalogViewMode = _CatalogViewMode.list;
-                    });
-                    widget.state.clearHistory();
-                  },
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text(
-                    'CLEAR',
-                    style: TextStyle(
-                      color: AppColors.error,
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                      letterSpacing: 1.0,
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
+          _buildCatalogHeader(history: history, isWide: isWide),
           if (_catalogViewMode == _CatalogViewMode.generative) ...[
             const SizedBox(height: AppSpacing.sm),
             _buildIntentInput(),
+            if (widget.state.schemaStream.persistedSchemas.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => widget.state.rehydratePreviousSchema(),
+                  child: const Text(
+                    'REHYDRATE PREVIOUS',
+                    style: TextStyle(fontFamily: 'monospace', fontSize: 9),
+                  ),
+                ),
+              ),
+            ],
           ],
           const SizedBox(height: AppSpacing.md),
           Expanded(child: _buildCatalogContent(history)),
@@ -242,33 +314,118 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildCatalogHeader({
+    required List<InferenceResult> history,
+    required bool isWide,
+  }) {
+    final title = const Text(
+      'VECTOR CATALOG & LEARNING',
+      style: TextStyle(
+        color: AppColors.primaryText,
+        fontFamily: 'monospace',
+        fontSize: 13,
+        fontWeight: FontWeight.bold,
+        letterSpacing: 1.2,
+      ),
+      overflow: TextOverflow.ellipsis,
+    );
+    final minimize = _CatalogMinimizeButton(
+      minimized: _catalogMinimized,
+      isWide: isWide,
+      onPressed: _toggleCatalogMinimized,
+    );
+    final toggle = _CatalogViewToggle(
+      mode: _catalogViewMode,
+      onChanged: (mode) => setState(() => _catalogViewMode = mode),
+    );
+    final clear = history.isEmpty
+        ? null
+        : TextButton(
+            onPressed: _clearCatalog,
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.zero,
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Semantics(
+              identifier: 'catalog_clear_button',
+              button: true,
+              label: 'CLEAR',
+              child: const Text(
+                'CLEAR',
+                style: TextStyle(
+                  color: AppColors.error,
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  letterSpacing: 1.0,
+                ),
+              ),
+            ),
+          );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stacked = !isWide || constraints.maxWidth < 520;
+
+        if (stacked) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: title),
+                  minimize,
+                  ?clear,
+                ],
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              toggle,
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: title),
+            minimize,
+            const SizedBox(width: AppSpacing.xs),
+            Flexible(child: toggle),
+            if (clear != null) ...[const SizedBox(width: AppSpacing.sm), clear],
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildCatalogContent(List<InferenceResult> history) {
     switch (_catalogViewMode) {
       case _CatalogViewMode.list:
         if (history.isEmpty) return _emptyCatalog();
         return _buildHistoryList();
-      case _CatalogViewMode.tree:
-        if (history.isEmpty) return _emptyCatalog();
-        return SimilarityTreeGraph(
-          history: history,
-          activeResult: widget.state.activeResult,
-        );
       case _CatalogViewMode.map:
         return EmbeddingSpaceMap(
           history: history,
           activeResult: widget.state.activeResult,
+          onPointSelected: widget.state.selectActiveResult,
         );
       case _CatalogViewMode.matrix:
         return SimilarityMatrix(history: history);
-      case _CatalogViewMode.challenge:
-        return SimilarityChallenge(
-          pool: history,
-          onRequestInference: (r) => widget.state.processText(r.text),
-        );
       case _CatalogViewMode.generative:
         return GenerativeHydrationInspector(
           schema: widget.state.generativeSchema,
-          intentText: _intentController.text,
+          intentText: _intentController.text.isNotEmpty
+              ? _intentController.text
+              : widget.state.lastIntentText,
+          generativeContext: widget.state.buildGenerativeContext(
+            onSelectResult: widget.state.selectActiveResult,
+          ),
+          suggestions: widget.state.generativeSchema == null
+              ? widget.state.routerSuggestions
+              : widget.state.intentPreview,
+          validationErrors: widget.state.schemaValidationErrors,
+          onSuggestionTap: widget.state.routerSuggestions.isNotEmpty
+              ? _applySuggestion
+              : null,
         );
     }
   }
@@ -288,44 +445,171 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildIntentInput() {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: TextField(
-            controller: _intentController,
-            style: const TextStyle(color: AppColors.primaryText, fontSize: 12),
-            decoration: InputDecoration(
-              hintText: 'DESCRIBE INTENT (e.g. compare similarity)...',
-              hintStyle: const TextStyle(
+        Row(
+          children: [
+            Expanded(
+              child: Semantics(
+                identifier: 'intent_input',
+                textField: true,
+                child: TextField(
+                  controller: _intentController,
+                  style: const TextStyle(
+                    color: AppColors.primaryText,
+                    fontSize: 12,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'DESCRIBE INTENT (e.g. compare similarity)...',
+                    hintStyle: const TextStyle(
+                      color: AppColors.mutedText,
+                      fontFamily: 'monospace',
+                      fontSize: 10,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: 8,
+                    ),
+                    filled: true,
+                    fillColor: AppColors.background,
+                    enabledBorder: AppBorders.inputBorder,
+                    focusedBorder: AppBorders.inputFocusedBorder,
+                  ),
+                  onChanged: widget.state.previewIntent,
+                  onSubmitted: (_) => _handleIntentSubmit(),
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            TextButton(
+              onPressed: _handleIntentSubmit,
+              child: Semantics(
+                identifier: 'hydrate_button',
+                button: true,
+                label: 'HYDRATE',
+                child: const Text(
+                  'HYDRATE',
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (widget.state.isRoutingIntent)
+          const Padding(
+            padding: EdgeInsets.only(top: AppSpacing.xs),
+            child: Text(
+              'ROUTING INTENT…',
+              style: TextStyle(
                 color: AppColors.mutedText,
                 fontFamily: 'monospace',
-                fontSize: 10,
+                fontSize: 9,
               ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.sm,
-                vertical: 8,
+            ),
+          )
+        else if (widget.state.intentPreview.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.xs),
+            child: Wrap(
+              spacing: AppSpacing.xs,
+              children: widget.state.intentPreview.map((s) {
+                return ActionChip(
+                  label: Text(
+                    '${s.templateId} (${(s.score * 100).toStringAsFixed(0)}%)',
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 8,
+                    ),
+                  ),
+                  backgroundColor: AppColors.background,
+                  side: const BorderSide(color: AppColors.borderDark),
+                  onPressed: () => _applySuggestion(s.description),
+                );
+              }).toList(),
+            ),
+          ),
+        const SizedBox(height: AppSpacing.xs),
+        Row(
+          children: [
+            SizedBox(
+              height: 28,
+              child: Switch(
+                value: widget.state.autoHydrate,
+                onChanged: widget.state.setAutoHydrate,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              filled: true,
-              fillColor: AppColors.background,
-              enabledBorder: AppBorders.inputBorder,
-              focusedBorder: AppBorders.inputFocusedBorder,
             ),
-            onSubmitted: (_) => _handleIntentSubmit(),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.xs),
-        TextButton(
-          onPressed: _handleIntentSubmit,
-          child: const Text(
-            'HYDRATE',
-            style: TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
+            const SizedBox(width: AppSpacing.xs),
+            const Text(
+              'AUTO-HYDRATE AFTER INFER',
+              style: TextStyle(
+                color: AppColors.mutedText,
+                fontFamily: 'monospace',
+                fontSize: 9,
+              ),
             ),
-          ),
+          ],
         ),
       ],
+    );
+  }
+
+  Widget _buildSuggestedLayoutChip() {
+    final suggestion = widget.state.suggestedLayout;
+    if (suggestion == null || _dismissedSuggestion) {
+      return const SizedBox.shrink();
+    }
+
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppBorders.radiusSm),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xs,
+        ),
+        decoration: BoxDecoration(
+          border: Border.all(color: AppColors.borderLight),
+          borderRadius: BorderRadius.circular(AppBorders.radiusSm),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'SUGGESTED: ${suggestion.templateId} (${(suggestion.score * 100).toStringAsFixed(0)}%)',
+                style: const TextStyle(
+                  color: AppColors.secondaryText,
+                  fontFamily: 'monospace',
+                  fontSize: 9,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            TextButton(
+              onPressed: () => _applySuggestion(suggestion.description),
+              child: const Text(
+                'APPLY',
+                style: TextStyle(fontFamily: 'monospace', fontSize: 9),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(
+                Icons.close,
+                size: 14,
+                color: AppColors.mutedText,
+              ),
+              onPressed: () => setState(() => _dismissedSuggestion = true),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -335,6 +619,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       children: [
         const Text(
           'NEURAL EMBEDDING ISOLATE',
+          key: Key('dashboard_title'),
           style: TextStyle(
             color: AppColors.primaryText,
             fontSize: 22,
@@ -366,87 +651,145 @@ class _DashboardScreenState extends State<DashboardScreen> {
       WorkerState.error => AppColors.error,
     };
 
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.md,
-        vertical: AppSpacing.sm,
-      ),
-      decoration: BoxDecoration(
-        color: AppColors.cardBackground,
-        borderRadius: BorderRadius.circular(AppBorders.radiusSm),
-        border: Border.all(color: AppColors.borderLight, width: 0.5),
-      ),
-      child: Row(
-        children: [
-          PulsingStatusIndicator(color: dotColor),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              message.toUpperCase(),
-              style: TextStyle(
-                color: dotColor,
-                fontFamily: 'monospace',
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (status == WorkerState.error ||
-              status == WorkerState.uninitialized)
-            TextButton(
-              onPressed: widget.state.initialize,
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text(
-                'RETRY',
+    return Semantics(
+      identifier: 'status_panel',
+      container: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.cardBackground,
+          borderRadius: BorderRadius.circular(AppBorders.radiusSm),
+          border: Border.all(color: AppColors.borderLight, width: 0.5),
+        ),
+        child: Row(
+          children: [
+            PulsingStatusIndicator(color: dotColor),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                message.toUpperCase(),
                 style: TextStyle(
-                  color: AppColors.primaryText,
+                  color: dotColor,
                   fontFamily: 'monospace',
                   fontSize: 11,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
                 ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-        ],
+            if (status == WorkerState.error ||
+                status == WorkerState.uninitialized)
+              TextButton(
+                onPressed: widget.state.initialize,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Semantics(
+                  identifier: 'worker_retry_button',
+                  button: true,
+                  label: 'RETRY',
+                  child: const Text(
+                    'RETRY',
+                    style: TextStyle(
+                      color: AppColors.primaryText,
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildInputArea() {
+  Widget _buildPrimaryInputFields() {
     final isReady =
         widget.state.status == WorkerState.ready && !widget.state.isProcessing;
 
-    final textField = TextField(
-      controller: _inputController,
-      enabled: isReady,
-      maxLines: 1,
-      style: const TextStyle(color: AppColors.primaryText, fontSize: 14),
-      decoration: InputDecoration(
-        hintText: isReady ? 'ENTER TEXT TO PROJECT...' : 'ISOLATE BUSY...',
-        hintStyle: const TextStyle(
-          color: AppColors.mutedText,
-          fontFamily: 'monospace',
-          fontSize: 12,
+    final textField = Semantics(
+      identifier: 'main_input',
+      textField: true,
+      child: TextField(
+        controller: _inputController,
+        enabled: isReady,
+        maxLines: 1,
+        textInputAction: TextInputAction.done,
+        style: const TextStyle(color: AppColors.primaryText, fontSize: 14),
+        decoration: InputDecoration(
+          hintText: isReady ? 'ENTER TEXT TO PROJECT...' : 'ISOLATE BUSY...',
+          hintStyle: const TextStyle(
+            color: AppColors.mutedText,
+            fontFamily: 'monospace',
+            fontSize: 12,
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: 12.0,
+          ),
+          filled: true,
+          fillColor: AppColors.cardBackground,
+          enabledBorder: AppBorders.inputBorder,
+          focusedBorder: AppBorders.inputFocusedBorder,
+          disabledBorder: AppBorders.inputBorder,
         ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: 12.0,
-        ),
-        filled: true,
-        fillColor: AppColors.cardBackground,
-        enabledBorder: AppBorders.inputBorder,
-        focusedBorder: AppBorders.inputFocusedBorder,
-        disabledBorder: AppBorders.inputBorder,
+        onSubmitted: (_) => _handleSubmit(),
       ),
-      onSubmitted: (_) => _handleSubmit(),
     );
 
-    final inferButton = SizedBox(
+    final layoutIntentField = Semantics(
+      identifier: 'layout_intent_input',
+      textField: true,
+      child: TextField(
+        controller: _layoutIntentController,
+        enabled: isReady,
+        style: const TextStyle(color: AppColors.primaryText, fontSize: 11),
+        decoration: InputDecoration(
+          hintText: 'OPTIONAL LAYOUT INTENT (e.g. compare)…',
+          hintStyle: const TextStyle(
+            color: AppColors.mutedText,
+            fontFamily: 'monospace',
+            fontSize: 10,
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: 8,
+          ),
+          filled: true,
+          fillColor: AppColors.background,
+          enabledBorder: AppBorders.inputBorder,
+          focusedBorder: AppBorders.inputFocusedBorder,
+          disabledBorder: AppBorders.inputBorder,
+        ),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        textField,
+        const SizedBox(height: AppSpacing.xs),
+        layoutIntentField,
+      ],
+    );
+  }
+
+  Widget _buildInferButton() {
+    final isReady =
+        widget.state.status == WorkerState.ready && !widget.state.isProcessing;
+
+    return SizedBox(
+      width: double.infinity,
       height: 44,
       child: ElevatedButton(
         onPressed: isReady ? _handleSubmit : null,
@@ -461,40 +804,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
         ),
-        child: const Text(
-          'INFER',
-          style: TextStyle(
-            fontFamily: 'monospace',
-            fontSize: 12,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 1.0,
+        child: Semantics(
+          identifier: 'infer_button',
+          button: true,
+          label: 'INFER',
+          child: const Text(
+            'INFER',
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.0,
+            ),
           ),
         ),
       ),
-    );
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 420) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              textField,
-              const SizedBox(height: AppSpacing.sm),
-              inferButton,
-            ],
-          );
-        }
-
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(child: textField),
-            const SizedBox(width: AppSpacing.sm),
-            inferButton,
-          ],
-        );
-      },
     );
   }
 
@@ -505,39 +829,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Row(
       children: [
         Expanded(
-          child: TextField(
-            controller: _compareController,
-            enabled: isReady,
-            style: const TextStyle(color: AppColors.primaryText, fontSize: 12),
-            decoration: InputDecoration(
-              hintText: 'COMPARE: SECOND TEXT...',
-              hintStyle: const TextStyle(
-                color: AppColors.mutedText,
-                fontFamily: 'monospace',
-                fontSize: 11,
+          child: Semantics(
+            identifier: 'compare_input',
+            textField: true,
+            child: TextField(
+              controller: _compareController,
+              enabled: isReady,
+              style: const TextStyle(
+                color: AppColors.primaryText,
+                fontSize: 12,
               ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: 10,
+              decoration: InputDecoration(
+                hintText: 'COMPARE: SECOND TEXT...',
+                hintStyle: const TextStyle(
+                  color: AppColors.mutedText,
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: 10,
+                ),
+                filled: true,
+                fillColor: AppColors.background,
+                enabledBorder: AppBorders.inputBorder,
+                focusedBorder: AppBorders.inputFocusedBorder,
+                disabledBorder: AppBorders.inputBorder,
               ),
-              filled: true,
-              fillColor: AppColors.background,
-              enabledBorder: AppBorders.inputBorder,
-              focusedBorder: AppBorders.inputFocusedBorder,
-              disabledBorder: AppBorders.inputBorder,
+              onSubmitted: (_) => _handleCompareSubmit(),
             ),
-            onSubmitted: (_) => _handleCompareSubmit(),
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
         TextButton(
           onPressed: isReady ? _handleCompareSubmit : null,
-          child: const Text(
-            'COMPARE',
-            style: TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
+          child: Semantics(
+            identifier: 'compare_button',
+            button: true,
+            label: 'COMPARE',
+            child: const Text(
+              'COMPARE',
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ),
@@ -577,6 +913,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         result: active,
         expanded: _activeDetailExpanded,
         headerLabel: 'ACTIVE PROJECTION METRICS',
+        semanticsIdentifier: 'active_vector_detail',
+        toggleSemanticsIdentifier: 'active_vector_detail_toggle',
         similarityToActive: active.hasError ? null : 1.0,
         compareEmbedding: compareEmbedding,
         onToggle: () =>
@@ -597,18 +935,75 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final item = history[index];
         final itemId = identityHashCode(item);
 
-        return VectorDetailPanel(
-          result: item,
-          expanded: _expandedHistoryIds.contains(itemId),
-          headerLabel: 'VECTOR #${history.length - index}',
-          similarityToActive: similarityToActive(
-            item,
-            active,
-            widget.state.similarities,
+        return Semantics(
+          identifier: index == 0 ? 'catalog_history_item' : null,
+          container: true,
+          child: VectorDetailPanel(
+            result: item,
+            expanded: _expandedHistoryIds.contains(itemId),
+            headerLabel: 'VECTOR #${history.length - index}',
+            toggleSemanticsIdentifier: index == 0
+                ? 'catalog_history_item_toggle'
+                : null,
+            similarityToActive: similarityToActive(
+              item,
+              active,
+              widget.state.similarities,
+            ),
+            onToggle: () => _toggleHistoryExpanded(itemId),
           ),
-          onToggle: () => _toggleHistoryExpanded(itemId),
         );
       },
+    );
+  }
+}
+
+class _CatalogMinimizeButton extends StatelessWidget {
+  final bool minimized;
+  final bool isWide;
+  final VoidCallback onPressed;
+
+  const _CatalogMinimizeButton({
+    required this.minimized,
+    required this.isWide,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Semantics(
+        identifier: 'catalog_minimize_button',
+        button: true,
+        label: minimized ? 'SHOW' : 'MIN',
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isWide ? Icons.chevron_right : Icons.expand_more,
+              color: AppColors.mutedText,
+              size: 16,
+            ),
+            const SizedBox(width: 2),
+            Text(
+              minimized ? 'SHOW' : 'MIN',
+              style: const TextStyle(
+                color: AppColors.mutedText,
+                fontFamily: 'monospace',
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -634,14 +1029,13 @@ class _CatalogViewToggle extends StatelessWidget {
           children: [
             for (final entry in [
               (_CatalogViewMode.list, 'LIST'),
-              (_CatalogViewMode.tree, 'TREE'),
               (_CatalogViewMode.map, 'MAP'),
               (_CatalogViewMode.matrix, 'MATRIX'),
-              (_CatalogViewMode.challenge, 'QUIZ'),
               (_CatalogViewMode.generative, 'GEN'),
             ])
               _ToggleChip(
                 label: entry.$2,
+                identifier: 'catalog_view_${entry.$2.toLowerCase()}',
                 selected: mode == entry.$1,
                 onTap: () => onChanged(entry.$1),
               ),
@@ -654,11 +1048,13 @@ class _CatalogViewToggle extends StatelessWidget {
 
 class _ToggleChip extends StatelessWidget {
   final String label;
+  final String identifier;
   final bool selected;
   final VoidCallback onTap;
 
   const _ToggleChip({
     required this.label,
+    required this.identifier,
     required this.selected,
     required this.onTap,
   });
@@ -667,24 +1063,30 @@ class _ToggleChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.sm,
-          vertical: AppSpacing.xs,
-        ),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.primaryText : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppBorders.radiusSm / 2),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: selected ? AppColors.background : AppColors.mutedText,
-            fontFamily: 'monospace',
-            fontSize: 9,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.6,
+      child: Semantics(
+        identifier: identifier,
+        button: true,
+        selected: selected,
+        label: label,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primaryText : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppBorders.radiusSm / 2),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? AppColors.background : AppColors.mutedText,
+              fontFamily: 'monospace',
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.6,
+            ),
           ),
         ),
       ),

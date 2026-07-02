@@ -25,6 +25,14 @@ class InferenceCommand extends IsolateCommand {
   const InferenceCommand({required this.text});
 }
 
+/// Lightweight intent embedding for generative routing (no pipeline stages).
+class IntentEmbedCommand extends IsolateCommand {
+  final String text;
+  final int requestId;
+
+  const IntentEmbedCommand({required this.text, required this.requestId});
+}
+
 /// Commands the Isolate to close sessions and release memory.
 class ShutdownCommand extends IsolateCommand {
   const ShutdownCommand();
@@ -54,6 +62,19 @@ class IsolateInferenceSuccess extends IsolateResponse {
   const IsolateInferenceSuccess({
     required this.embedding,
     required this.inferenceTimeMs,
+    required this.text,
+  });
+}
+
+/// Intent embedding result for generative routing.
+class IsolateIntentEmbedSuccess extends IsolateResponse {
+  final int requestId;
+  final List<double> embedding;
+  final String text;
+
+  const IsolateIntentEmbedSuccess({
+    required this.requestId,
+    required this.embedding,
     required this.text,
   });
 }

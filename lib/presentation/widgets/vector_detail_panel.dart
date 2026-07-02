@@ -14,6 +14,8 @@ class VectorDetailPanel extends StatelessWidget {
   final double? similarityToActive;
   final String? headerLabel;
   final List<double>? compareEmbedding;
+  final String? semanticsIdentifier;
+  final String? toggleSemanticsIdentifier;
 
   const VectorDetailPanel({
     super.key,
@@ -23,6 +25,8 @@ class VectorDetailPanel extends StatelessWidget {
     this.similarityToActive,
     this.headerLabel,
     this.compareEmbedding,
+    this.semanticsIdentifier,
+    this.toggleSemanticsIdentifier,
   });
 
   @override
@@ -35,7 +39,7 @@ class VectorDetailPanel extends StatelessWidget {
     final stats = EmbeddingStats.fromEmbedding(embedding);
     final preview = _formatVectorPreview(embedding);
 
-    return Material(
+    final panel = Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onToggle,
@@ -65,23 +69,35 @@ class VectorDetailPanel extends StatelessWidget {
                   ),
                   const SizedBox(width: AppSpacing.xs),
                   Expanded(
-                    child: Text(
-                      headerLabel ?? 'VECTOR DETAILS',
-                      style: const TextStyle(
-                        color: AppColors.mutedText,
-                        fontFamily: 'monospace',
-                        fontSize: 10,
-                        letterSpacing: 0.5,
+                    child: Semantics(
+                      identifier: semanticsIdentifier == null
+                          ? null
+                          : '${semanticsIdentifier}_header',
+                      header: true,
+                      child: Text(
+                        headerLabel ?? 'VECTOR DETAILS',
+                        style: const TextStyle(
+                          color: AppColors.mutedText,
+                          fontFamily: 'monospace',
+                          fontSize: 10,
+                          letterSpacing: 0.5,
+                        ),
                       ),
                     ),
                   ),
-                  Text(
-                    expanded ? 'COLLAPSE' : 'EXPAND',
-                    style: const TextStyle(
-                      color: AppColors.secondaryText,
-                      fontFamily: 'monospace',
-                      fontSize: 9,
-                      letterSpacing: 0.5,
+                  Semantics(
+                    identifier: toggleSemanticsIdentifier,
+                    button: true,
+                    label: expanded ? 'COLLAPSE' : 'EXPAND',
+                    onTap: onToggle,
+                    child: Text(
+                      expanded ? 'COLLAPSE' : 'EXPAND',
+                      style: const TextStyle(
+                        color: AppColors.secondaryText,
+                        fontFamily: 'monospace',
+                        fontSize: 9,
+                        letterSpacing: 0.5,
+                      ),
                     ),
                   ),
                 ],
@@ -144,6 +160,14 @@ class VectorDetailPanel extends StatelessWidget {
           ),
         ),
       ),
+    );
+
+    if (semanticsIdentifier == null) return panel;
+
+    return Semantics(
+      identifier: semanticsIdentifier,
+      container: true,
+      child: panel,
     );
   }
 

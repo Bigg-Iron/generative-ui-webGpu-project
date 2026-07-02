@@ -1,0 +1,21 @@
+appId: com.example.generativeUiWebgpu
+---
+- tapOn:
+    id: main_input
+- inputText: "semantic embedding probe"
+- tapOn:
+    id: status_panel
+- tapOn:
+    id: infer_button
+- extendedWaitUntil:
+    visible:
+      id: catalog_history_item
+    timeout: 120000
+- extendedWaitUntil:
+    visible: "CLEAR"
+    timeout: 30000
+- scrollUntilVisible:
+    element: "semantic embedding probe"
+    direction: DOWN
+    timeout: 60000
+- assertVisible: "semantic embedding probe"

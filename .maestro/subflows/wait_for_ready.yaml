@@ -1,0 +1,12 @@
+appId: com.example.generativeUiWebgpu
+---
+- extendedWaitUntil:
+    visible:
+      id: status_panel
+    timeout: 90000
+- extendedWaitUntil:
+    visible: ".*READY.*"
+    timeout: 180000
+- runFlow: ../subflows/scroll_to_inputs.yaml
+- assertVisible:
+    id: infer_button

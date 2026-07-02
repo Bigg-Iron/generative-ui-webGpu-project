@@ -1,0 +1,32 @@
+appId: com.example.generativeUiWebgpu
+---
+- launchApp:
+    clearState: true
+- runFlow: ../subflows/wait_for_ready.yaml
+- runFlow: ../subflows/run_single_inference.yaml
+- tapOn:
+    id: compare_input
+- inputText: "compare similarity anchor"
+- tapOn:
+    id: status_panel
+- tapOn:
+    id: compare_button
+- extendedWaitUntil:
+    visible: ".*READY.*"
+    timeout: 120000
+- scrollUntilVisible:
+    element:
+      id: catalog_view_gen
+    direction: DOWN
+- tapOn:
+    id: catalog_view_gen
+- tapOn:
+    id: intent_input
+- inputText: "compare similarity between vectors"
+- tapOn:
+    id: status_panel
+- tapOn:
+    id: hydrate_button
+- extendedWaitUntil:
+    visible: ".*(TEMPLATE:|compare_split|SIMILARITY|HYDRATE).*"
+    timeout: 90000

@@ -1,0 +1,14 @@
+appId: com.example.generativeUiWebgpu
+---
+- launchApp:
+    clearState: true
+- assertVisible: "NEURAL EMBEDDING ISOLATE"
+- assertVisible:
+    id: status_panel
+- runFlow: ../subflows/scroll_to_inputs.yaml
+- scrollUntilVisible:
+    element:
+      text: "VECTOR CATALOG & LEARNING"
+    direction: DOWN
+- assertVisible: "VECTOR CATALOG & LEARNING"
+- assertVisible: "CATALOG EMPTY"

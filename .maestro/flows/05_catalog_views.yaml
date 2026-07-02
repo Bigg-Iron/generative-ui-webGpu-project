@@ -1,0 +1,19 @@
+appId: com.example.generativeUiWebgpu
+---
+- launchApp:
+    clearState: true
+- runFlow: ../subflows/wait_for_ready.yaml
+- runFlow: ../subflows/run_single_inference.yaml
+- tapOn:
+    id: catalog_view_map
+- assertVisible: "SEMANTIC SPACE MAP"
+- tapOn:
+    id: catalog_view_matrix
+- assertVisible: "PAIRWISE SIMILARITY MATRIX"
+- tapOn:
+    id: catalog_view_gen
+- assertVisible: "TYPE AN INTENT TO HYDRATE PRIMITIVES"
+- tapOn:
+    id: catalog_view_list
+- assertVisible:
+    id: catalog_history_item

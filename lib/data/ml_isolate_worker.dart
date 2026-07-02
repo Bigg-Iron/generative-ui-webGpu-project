@@ -70,6 +70,14 @@ class MlIsolateWorker {
     port.send(InferenceCommand(text: text));
   }
 
+  void embedIntent(String text, {required int requestId}) {
+    final port = _commandPort;
+    if (port == null || !_isReady) {
+      throw StateError('Isolate is not ready for intent embedding.');
+    }
+    port.send(IntentEmbedCommand(text: text, requestId: requestId));
+  }
+
   Future<void> stop() async {
     _commandPort?.send(const ShutdownCommand());
     _isolate?.kill(priority: Isolate.beforeNextEvent);
@@ -156,95 +164,14 @@ class MlIsolateWorker {
             throw StateError('Tokenizer not initialized');
           }
 
-          // Tokenize
-          final tokenStrings = tokenizer.tokenizeToStrings(text);
-          final inputIds = tokenizer.encode(text);
-          final inputLength = inputIds.where((id) => id != tokenizer!.padId).length;
-
-          mainSendPort.send(IsolatePipelineStage(
-            stage: PipelineStage.tokenize,
-            detail: '${tokenStrings.length} tokens',
-            tokens: tokenStrings,
-            seqLen: inputLength,
-          ));
-
-          mainSendPort.send(IsolatePipelineStage(
-            stage: PipelineStage.tensor,
-            detail: '[1, $inputLength]',
-            seqLen: inputLength,
-          ));
-
-          List<double> embedding;
-
-          if (isFallbackMock || session == null) {
-            mainSendPort.send(const IsolatePipelineStage(
-              stage: PipelineStage.infer,
-              detail: 'Mock forward pass',
-            ));
-
-            embedding = _generateMockEmbedding(text);
-            await Future.delayed(const Duration(milliseconds: 45));
-          } else {
-            mainSendPort.send(const IsolatePipelineStage(
-              stage: PipelineStage.infer,
-              detail: 'ONNX session.run',
-            ));
-
-            // Run real ONNX inference
-            // BGE-small expects: input_ids [batch, seq_len], attention_mask [batch, seq_len], token_type_ids [batch, seq_len]
-            final shape = [1, inputLength];
-            
-            final attentionMask = List<int>.generate(inputLength, (i) => inputIds[i] == tokenizer!.padId ? 0 : 1);
-            final tokenTypeIds = List<int>.filled(inputLength, 0);
-
-            final ortInputIds = OrtValueTensor.createTensorWithDataList(Int64List.fromList(inputIds), shape);
-            final ortAttentionMask = OrtValueTensor.createTensorWithDataList(Int64List.fromList(attentionMask), shape);
-            final ortTokenTypeIds = OrtValueTensor.createTensorWithDataList(Int64List.fromList(tokenTypeIds), shape);
-
-            final inputs = {
-              'input_ids': ortInputIds,
-              'attention_mask': ortAttentionMask,
-              'token_type_ids': ortTokenTypeIds,
-            };
-
-            final runOptions = OrtRunOptions();
-            final outputs = await session.runAsync(runOptions, inputs);
-
-            if (outputs != null && outputs.isNotEmpty) {
-              // BGE output is usually 'last_hidden_state' or 'sentence_embedding' at index 0
-              final outputValue = outputs[0];
-              if (outputValue != null) {
-                final rawData = outputValue.value as List;
-                embedding = _parseEmbeddingFromOnnxOutput(rawData, inputIds, tokenizer.padId);
-              } else {
-                throw StateError('ONNX model output at index 0 is null');
-              }
-            } else {
-              throw StateError('ONNX model output list is null or empty');
-            }
-
-            // Dispose tensors
-            ortInputIds.release();
-            ortAttentionMask.release();
-            ortTokenTypeIds.release();
-            runOptions.release();
-            for (final out in outputs) {
-              out?.release();
-            }
-          }
-
-          mainSendPort.send(IsolatePipelineStage(
-            stage: PipelineStage.pool,
-            detail: 'Mean pool → ${embedding.length}d',
-            seqLen: embedding.length,
-          ));
-
-          final norm = _l2Norm(embedding);
-          mainSendPort.send(IsolatePipelineStage(
-            stage: PipelineStage.normalize,
-            detail: 'L2 normalize',
-            l2Norm: norm,
-          ));
+          final embedding = await _runEmbedding(
+            text: text,
+            tokenizer: tokenizer,
+            session: session,
+            isFallbackMock: isFallbackMock,
+            mainSendPort: mainSendPort,
+            emitPipelineStages: true,
+          );
 
           final elapsedMs = DateTime.now().difference(startTime).inMicroseconds / 1000.0;
 
@@ -259,12 +186,153 @@ class MlIsolateWorker {
             originalText: text,
           ));
         }
+      } else if (command is IntentEmbedCommand) {
+        try {
+          if (tokenizer == null) {
+            throw StateError('Tokenizer not initialized');
+          }
+
+          final embedding = await _runEmbedding(
+            text: command.text,
+            tokenizer: tokenizer,
+            session: session,
+            isFallbackMock: isFallbackMock,
+            mainSendPort: mainSendPort,
+            emitPipelineStages: false,
+          );
+
+          mainSendPort.send(IsolateIntentEmbedSuccess(
+            requestId: command.requestId,
+            embedding: embedding,
+            text: command.text,
+          ));
+        } catch (e) {
+          mainSendPort.send(IsolateErrorResponse(
+            message: 'Intent embed error: $e',
+            originalText: command.text,
+          ));
+        }
       } else if (command is ShutdownCommand) {
         session?.release();
         OrtEnv.instance.release();
         Isolate.exit();
       }
     }
+  }
+
+  static Future<List<double>> _runEmbedding({
+    required String text,
+    required WordPieceTokenizer tokenizer,
+    required OrtSession? session,
+    required bool isFallbackMock,
+    required SendPort mainSendPort,
+    required bool emitPipelineStages,
+  }) async {
+    final tokenStrings = tokenizer.tokenizeToStrings(text);
+    final inputIds = tokenizer.encode(text);
+    final inputLength = inputIds.where((id) => id != tokenizer.padId).length;
+
+    if (emitPipelineStages) {
+      mainSendPort.send(IsolatePipelineStage(
+        stage: PipelineStage.tokenize,
+        detail: '${tokenStrings.length} tokens',
+        tokens: tokenStrings,
+        seqLen: inputLength,
+      ));
+
+      mainSendPort.send(IsolatePipelineStage(
+        stage: PipelineStage.tensor,
+        detail: '[1, $inputLength]',
+        seqLen: inputLength,
+      ));
+    }
+
+    List<double> embedding;
+
+    if (isFallbackMock || session == null) {
+      if (emitPipelineStages) {
+        mainSendPort.send(const IsolatePipelineStage(
+          stage: PipelineStage.infer,
+          detail: 'Mock forward pass',
+        ));
+      }
+
+      embedding = _generateMockEmbedding(text);
+      await Future.delayed(const Duration(milliseconds: 45));
+    } else {
+      if (emitPipelineStages) {
+        mainSendPort.send(const IsolatePipelineStage(
+          stage: PipelineStage.infer,
+          detail: 'ONNX session.run',
+        ));
+      }
+
+      final shape = [1, inputLength];
+      final attentionMask = List<int>.generate(
+        inputLength,
+        (i) => inputIds[i] == tokenizer.padId ? 0 : 1,
+      );
+      final tokenTypeIds = List<int>.filled(inputLength, 0);
+
+      final ortInputIds = OrtValueTensor.createTensorWithDataList(
+        Int64List.fromList(inputIds),
+        shape,
+      );
+      final ortAttentionMask = OrtValueTensor.createTensorWithDataList(
+        Int64List.fromList(attentionMask),
+        shape,
+      );
+      final ortTokenTypeIds = OrtValueTensor.createTensorWithDataList(
+        Int64List.fromList(tokenTypeIds),
+        shape,
+      );
+
+      final inputs = {
+        'input_ids': ortInputIds,
+        'attention_mask': ortAttentionMask,
+        'token_type_ids': ortTokenTypeIds,
+      };
+
+      final runOptions = OrtRunOptions();
+      final outputs = await session.runAsync(runOptions, inputs);
+
+      if (outputs != null && outputs.isNotEmpty) {
+        final outputValue = outputs[0];
+        if (outputValue != null) {
+          final rawData = outputValue.value as List;
+          embedding = _parseEmbeddingFromOnnxOutput(rawData, inputIds, tokenizer.padId);
+        } else {
+          throw StateError('ONNX model output at index 0 is null');
+        }
+      } else {
+        throw StateError('ONNX model output list is null or empty');
+      }
+
+      ortInputIds.release();
+      ortAttentionMask.release();
+      ortTokenTypeIds.release();
+      runOptions.release();
+      for (final out in outputs) {
+        out?.release();
+      }
+    }
+
+    if (emitPipelineStages) {
+      mainSendPort.send(IsolatePipelineStage(
+        stage: PipelineStage.pool,
+        detail: 'Mean pool → ${embedding.length}d',
+        seqLen: embedding.length,
+      ));
+
+      final norm = _l2Norm(embedding);
+      mainSendPort.send(IsolatePipelineStage(
+        stage: PipelineStage.normalize,
+        detail: 'L2 normalize',
+        l2Norm: norm,
+      ));
+    }
+
+    return embedding;
   }
 
   /// Generates a mock embedding based on the text hash, normalized so L2 norm is 1.0.

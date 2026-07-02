@@ -1,0 +1,16 @@
+appId: com.example.generativeUiWebgpu
+---
+- launchApp:
+    clearState: true
+- runFlow: ../subflows/wait_for_ready.yaml
+- runFlow: ../subflows/run_single_inference.yaml
+- tapOn:
+    id: compare_input
+- inputText: "tensor projection math"
+- tapOn:
+    id: status_panel
+- tapOn:
+    id: compare_button
+- extendedWaitUntil:
+    visible: ".*READY.*"
+    timeout: 120000

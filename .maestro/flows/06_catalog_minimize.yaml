@@ -1,0 +1,16 @@
+appId: com.example.generativeUiWebgpu
+---
+- launchApp:
+    clearState: true
+- runFlow: ../subflows/wait_for_ready.yaml
+- scrollUntilVisible:
+    element:
+      text: "VECTOR CATALOG & LEARNING"
+    direction: DOWN
+- assertVisible: "VECTOR CATALOG & LEARNING"
+- tapOn:
+    id: catalog_minimize_button
+- assertNotVisible: "VECTOR CATALOG & LEARNING"
+- assertVisible: "CATALOG"
+- tapOn: "CATALOG"
+- assertVisible: "VECTOR CATALOG & LEARNING"

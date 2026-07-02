@@ -1,0 +1,12 @@
+appId: com.example.generativeUiWebgpu
+---
+- tapOn:
+    id: main_input
+- inputText: "layout intent routing"
+- tapOn:
+    id: layout_intent_input
+- inputText: "compare similarity"
+- tapOn:
+    id: status_panel
+- tapOn:
+    id: infer_button
