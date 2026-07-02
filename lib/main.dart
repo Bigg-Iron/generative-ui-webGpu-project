@@ -1,9 +1,21 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
 import 'core/constants.dart';
+import 'debug/agent_log.dart';
 import 'presentation/screens/dashboard.dart';
 import 'presentation/state/ml_state.dart';
 
 void main() {
+  // #region agent log
+  agentLog(
+    location: 'main.dart:main',
+    message: 'App main() reached',
+    hypothesisId: 'B',
+    data: {'kIsWeb': kIsWeb},
+  );
+  // #endregion
+
   runApp(const NeuralEmbeddingApp());
 }
 

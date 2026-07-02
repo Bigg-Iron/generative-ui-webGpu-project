@@ -1,14 +1,12 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:path_provider/path_provider.dart';
 
 import '../../data/embedding_intent_router.dart';
 import '../../data/ml_isolate_worker.dart';
+import '../../data/model_asset_paths.dart';
 import '../../domain/generative_context.dart';
 import '../../domain/inference_result.dart';
 import '../../domain/isolate_message.dart';
@@ -217,24 +215,10 @@ class MlState extends ChangeNotifier {
       _intentRouter.attachToResponseStream(_worker.responseStream);
       _worker.responseStream.listen(_handleIsolateResponse);
 
-      final tempDir = await getTemporaryDirectory();
+      final assetPaths = await resolveModelAssetPaths();
       if (_isDisposed) return;
-      final modelFile = File('${tempDir.path}/model.onnx');
-      final vocabFile = File('${tempDir.path}/vocab.txt');
 
-      try {
-        final modelBytes = await rootBundle.load(
-          'assets/models/bge-small-en-v1.5/onnx/model.onnx',
-        );
-        await modelFile.writeAsBytes(modelBytes.buffer.asUint8List());
-      } catch (_) {}
-
-      try {
-        final vocabBytes = await rootBundle.load('assets/vocab.txt');
-        await vocabFile.writeAsBytes(vocabBytes.buffer.asUint8List());
-      } catch (_) {}
-
-      _worker.initializeModel(modelFile.path, vocabFile.path);
+      _worker.initializeModel(assetPaths.modelPath, assetPaths.vocabPath);
       _attachFrameMonitor();
     } catch (e) {
       if (_isDisposed) return;
